@@ -1,0 +1,26 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check that the tag matches the card version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -q "const VERSION = '${version}';" dist/rewind-tile-card.js; then
+            echo "VERSION in dist/rewind-tile-card.js does not match tag ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/rewind-tile-card.js
+          generate_release_notes: true
