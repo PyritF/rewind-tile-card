@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Fix: a picked day was reset to today when Home Assistant recreated its energy date picker (for example right after the dashboard reloaded).
+- Date bar stays on one line on phones.
+- Details dialog shows fewer time labels on narrow screens so they no longer overlap.
+
 ## 0.1.0
 
 First release.

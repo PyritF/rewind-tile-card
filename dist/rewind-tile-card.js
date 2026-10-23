@@ -9,7 +9,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const DOCS_URL = 'https://github.com/PyritF/rewind-tile-card';
   const HOUR = 3600e3;
   const DAY = 24 * HOUR;
@@ -338,16 +338,7 @@
       STORE.energy[pKey] = { coll: coll || null };
       return;
     }
-    const entry = { coll };
-    entry.unsubColl = coll.subscribe(() => {
-      const s = coll.start;
-      if (!(s instanceof Date)) return;
-      const e = coll.end instanceof Date ? coll.end : addDays(s, 1);
-      if (e.getTime() - s.getTime() > 25 * HOUR) return; // week/month selected: ignore
-      setPeriod(pKey, ymd(s) >= todayYmd() ? null : ymd(s), 'energy');
-    });
-    entry.unsubStore = subscribePeriod(pKey, (p, source) => {
-      if (source === 'energy') return;
+    const push = (p) => {
       const day = p == null ? startOfDay(new Date()) : parseYmd(p);
       const cs = coll.start;
       const ce = coll.end;
@@ -358,6 +349,20 @@
       } catch (err) {
         console.warn('rewind-tile-card: could not sync the energy date picker', err);
       }
+    };
+    const entry = { coll };
+    // A collection that appears (or is recreated) after a day was picked starts at "today":
+    // hand it the picked day instead of letting it reset the cards.
+    if (getPeriod(pKey) != null) push(getPeriod(pKey));
+    entry.unsubColl = coll.subscribe(() => {
+      const s = coll.start;
+      if (!(s instanceof Date)) return;
+      const e = coll.end instanceof Date ? coll.end : addDays(s, 1);
+      if (e.getTime() - s.getTime() > 25 * HOUR) return; // week/month selected: ignore
+      setPeriod(pKey, ymd(s) >= todayYmd() ? null : ymd(s), 'energy');
+    });
+    entry.unsubStore = subscribePeriod(pKey, (p, source) => {
+      if (source !== 'energy') push(p);
     });
     STORE.energy[pKey] = entry;
   }
@@ -776,16 +781,24 @@
 
   const BAR_CSS = `
     :host { display: block; container-type: inline-size; }
-    ha-card { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px; box-sizing: border-box; }
-    .date { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent;
-      color: var(--primary-text-color, #e1e1e1); font: inherit; font-size: 16px; font-weight: 500; cursor: pointer; transition: background .15s; --mdc-icon-size: 20px; }
+    ha-card { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; padding: 6px; box-sizing: border-box; }
+    .date { display: flex; flex: 1 1 auto; align-items: center; gap: 10px; min-width: 0; min-height: 44px; margin-right: auto; padding: 0 12px; border: 0; border-radius: 10px;
+      background: transparent; color: var(--primary-text-color, #e1e1e1); font: inherit; font-size: 16px; font-weight: 500; text-align: left; cursor: pointer;
+      transition: background .15s; --mdc-icon-size: 20px; }
     .date:hover { background: color-mix(in srgb, var(--primary-text-color, #e1e1e1) 6%, transparent); }
+    .long, .short { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .date ha-icon { flex: none; }
     .chev { transition: transform .2s; }
     .date[aria-expanded="true"] .chev { transform: rotate(180deg); }
     .short { display: none; }
     @container (max-width: 520px) { .long { display: none; } .short { display: inline; } }
-    .spacer { flex: 1 1 auto; }
-    .now { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; margin-right: 4px; padding: 0 14px; border-radius: 18px;
+    @container (max-width: 400px) {
+      .date { gap: 8px; padding: 0 8px; }
+      .chev { display: none; }
+      .now { margin-right: 0; padding: 0 10px; }
+      .iconbtn { width: 40px; height: 40px; }
+    }
+    .now { display: inline-flex; flex: none; align-items: center; gap: 8px; min-height: 36px; margin-right: 4px; padding: 0 14px; border-radius: 18px;
       border: 1px solid var(--divider-color, rgba(255, 255, 255, .18)); background: transparent; color: var(--primary-text-color, #e1e1e1);
       font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; transition: background .25s, border-color .25s, color .25s; }
     .now:hover { background: color-mix(in srgb, var(--primary-text-color, #e1e1e1) 6%, transparent); }
@@ -1456,7 +1469,6 @@
           <button class="date" type="button" aria-haspopup="dialog" aria-expanded="false">
             <ha-icon icon="mdi:calendar"></ha-icon><span class="long"></span><span class="short"></span><ha-icon class="chev" icon="mdi:chevron-down"></ha-icon>
           </button>
-          <span class="spacer"></span>
           <button class="now" type="button"><span class="pulse"></span><span class="nowtxt"></span></button>
           <button class="iconbtn prev" type="button"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
           <button class="iconbtn next" type="button"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
@@ -1822,7 +1834,7 @@
           const t = h === 24 ? endDay.getTime() : atHour(start, h).getTime();
           let label = fmtTime(hass, t);
           if (h === 24 && /^0?0[:.]00/.test(label)) label = '24' + label.replace(/^0?0/, '');
-          return { t, label };
+          return { t, label, minor: h % 6 !== 0 };
         });
         const prevDay = addDays(start, -1);
         if (kind === 'energy') {
@@ -1902,7 +1914,15 @@
         for (let i = 0; i < n; i++) {
           const d = addDays(start, i);
           const label = n === 7 ? fmtDate(hass, d, { weekday: 'short', day: 'numeric' }) : fmtDate(hass, d, { day: 'numeric', month: 'numeric' });
-          if (n === 7 || i % 5 === 0 || i === n - 1) m.xt.push({ t: atHour(d, 12).getTime(), label, mid: true });
+          if (n === 7 || i % 5 === 0 || i === n - 1) {
+            m.xt.push({
+              t: atHour(d, 12).getTime(),
+              label,
+              short: n === 7 ? fmtDate(hass, d, { weekday: 'narrow' }) : null,
+              minor: n > 7 && i % 10 !== 0 && i !== n - 1,
+              mid: true
+            });
+          }
           if (i > 0) m.vlines.push(d.getTime());
         }
         if (kind === 'energy') {
@@ -2044,10 +2064,11 @@
       html += '<div class="hover"><span class="xh"></span>' + m.series.map((_, i) => '<span class="hd hdx' + i + '"></span>').join('')
         + '<div class="tip"><span class="tip-t"></span>' + m.series.map((_, i) => '<span class="tip-r tr' + i + '"><span class="dot"></span><span></span></span>').join('') + '</div></div>';
       html += '</div>';
-      html += '<div class="xax">' + m.xt.map((tk) => {
+      const narrow = e.chart.clientWidth < 520;
+      html += '<div class="xax">' + m.xt.filter((tk) => !(narrow && tk.minor)).map((tk) => {
         const lp = (tk.t - m.dom[0]) / (m.dom[1] - m.dom[0]) * 100;
         const tf = tk.mid ? 'translateX(-50%)' : (lp < 1 ? 'none' : (lp > 99 ? 'translateX(-100%)' : 'translateX(-50%)'));
-        return '<span class="tick" style="left:' + pct(lp) + ';transform:' + tf + '">' + esc(tk.label) + '</span>';
+        return '<span class="tick" style="left:' + pct(lp) + ';transform:' + tf + '">' + esc(narrow && tk.short ? tk.short : tk.label) + '</span>';
       }).join('') + '</div>';
       if (m.msg) html += '<div class="msg">' + esc(m.msg) + '</div>';
       e.chart.innerHTML = html;
